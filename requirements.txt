@@ -1,0 +1,50 @@
+# Core AI / LLM
+ollama
+groq
+google-genai
+python-dotenv
+
+# Web framework & real-time UI
+flask
+flask-cors
+flask-socketio
+
+# HTTP & web
+requests
+selenium
+webdriver-manager
+yt-dlp
+
+# Audio / TTS
+sounddevice
+soundfile
+kokoro-onnx
+
+# Vision & image
+Pillow
+pyautogui
+
+# Numeric
+numpy
+
+# Document reading & writing
+pypdf
+python-docx
+openpyxl
+fpdf2
+
+# File management
+Send2Trash
+
+# Windows desktop automation (Windows only)
+pywin32
+
+# Optional input hook (kill-switch hotkey)
+keyboard
+
+# System tray / notifications — handled via Electron (no extra pip package needed)
+
+# External binary dependency (not pip-installable):
+# ffmpeg  — required by yt-dlp for audio extraction / format conversion.
+#            Download from https://ffmpeg.org/download.html and place on PATH,
+#            or set the ffmpeg_location option in the yt_dlp config to its folder.
