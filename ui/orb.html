@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8"/>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+html, body {
+  width:160px; height:160px;
+  background:transparent; overflow:hidden;
+  user-select:none;
+}
+#orbWrap {
+  width:160px; height:160px; position:relative;
+  cursor:grab;
+  display:flex; align-items:center; justify-content:center;
+  -webkit-app-region: drag; /* native OS-level drag — works even once the
+    cursor leaves this tiny window, unlike manual mousemove tracking */
+}
+#orbWrap:active { cursor:grabbing; }
+
+/* State colour variables */
+#orbWrap.state-online    { --c:#22d87e; --cs:rgba(34,216,126,.7);  }
+#orbWrap.state-offline   { --c:#ff3b5c; --cs:rgba(255,59,92,.7);   }
+#orbWrap.state-thinking  { --c:#1eb4ff; --cs:rgba(30,180,255,.7);  }
+#orbWrap.state-muted     { --c:#f5c842; --cs:rgba(245,200,66,.7);  }
+#orbWrap.state-done      { --c:#b967ff; --cs:rgba(185,103,255,.7); }
+#orbWrap.state-countdown { --c:#ff8a3f; --cs:rgba(255,138,63,.7);  }
+/* New Layer 1/2/3 states — distinct hues from everything above:
+   searching = cyan/teal, reading = indigo, writing = magenta/pink
+   (writing is reserved for Layer 3, unused until document generation exists). */
+#orbWrap.state-searching { --c:#00e5c7; --cs:rgba(0,229,199,.7);   }
+#orbWrap.state-reading   { --c:#5b8cff; --cs:rgba(91,140,255,.7);  }
+#orbWrap.state-writing   { --c:#ff5ec7; --cs:rgba(255,94,199,.7);  }
+/* OVERCLOCK — electric violet, deliberately distinct from every other state
+   (including the softer lavender "done") so it reads as "a different gear
+   entirely" at a glance, matching the main UI's own overclock re-theme. */
+#orbWrap.state-overclock { --c:#b026ff; --cs:rgba(176,38,255,.85); }
+/* WORKING / WAITING — she is carrying out a task (or has stopped and needs you). Lime and amber, distinct from every state above. */
+#orbWrap.state-working { --c:#a6ff4d; --cs:rgba(166,255,77,.7); }
+#orbWrap.state-waiting { --c:#ffb02e; --cs:rgba(255,176,46,.75); }
+
+svg { width:160px; height:160px; overflow:visible; pointer-events:none; position:absolute; top:0; left:0; }
+.ring { fill:none; stroke:var(--c); }
+.ring1 { stroke-width:1;   opacity:.5;  animation:spinR 9s  linear infinite; transform-origin:80px 80px; }
+.ring2 { stroke-width:.7; opacity:.28; animation:spinL 6s  linear infinite; transform-origin:80px 80px; }
+.ring3 { stroke-width:.5; opacity:.18; animation:spinR 14s linear infinite; transform-origin:80px 80px; }
+@keyframes spinR { to { transform:rotate(360deg);  } }
+@keyframes spinL { to { transform:rotate(-360deg); } }
+
+.wave { fill:none; stroke:var(--c); stroke-width:1; opacity:0; animation:wavePulse 2.8s ease-out infinite; }
+.wave:nth-child(1){ animation-delay:0s; }
+.wave:nth-child(2){ animation-delay:.7s; }
+.wave:nth-child(3){ animation-delay:1.4s; }
+@keyframes wavePulse { 0%{r:28;opacity:.6;} 100%{r:74;opacity:0;} }
+
+.glowRing { fill:none; stroke:var(--c); stroke-width:1.5; animation:glowPulse 3s ease-in-out infinite; }
+@keyframes glowPulse { 0%,100%{opacity:.16;} 50%{opacity:.40;} }
+
+#core {
+  stroke:var(--c); stroke-width:2; stroke-opacity:.85;
+  filter:drop-shadow(0 0 10px var(--cs));
+  transition:stroke .4s, filter .4s;
+}
+#orbWrap.state-thinking #core { animation:coreGlow 1s ease-in-out infinite alternate; }
+#orbWrap.state-countdown #core { animation:coreGlow .6s ease-in-out infinite alternate; }
+/* Same pulsing glow language as thinking/countdown — a file-op is also an
+   "actively working" state, so it should read the same way at a glance. */
+#orbWrap.state-searching #core,
+#orbWrap.state-reading #core,
+#orbWrap.state-writing #core { animation:coreGlow 1.2s ease-in-out infinite alternate; }
+#orbWrap.state-working #core { animation:coreGlow 1.4s ease-in-out infinite alternate; }
+#orbWrap.state-waiting #core { animation:coreGlow .9s ease-in-out infinite alternate; }
+/* Slower, heavier pulse than "thinking" — reads as a bigger, weightier
+   model actually working, matching Overclock's "this takes longer" nature. */
+#orbWrap.state-overclock #core { animation:coreGlow 1.8s ease-in-out infinite alternate; }
+@keyframes coreGlow { from{stroke-opacity:.3;} to{stroke-opacity:1;} }
+
+.hexLine { stroke:var(--c); stroke-width:.4; opacity:.14; fill:none; }
+.scanLine { stroke:var(--c); stroke-width:.7; opacity:0; animation:scanAnim 4s ease-in-out infinite; }
+@keyframes scanAnim {
+  0%  { opacity:0; transform:translateY(-20px); }
+  30% { opacity:.28; }
+  70% { opacity:.28; }
+  100%{ opacity:0; transform:translateY(20px); }
+}
+
+.data-dot { fill:var(--c); animation:dotPulse 2.2s ease-in-out infinite; }
+.data-dot:nth-child(1){ animation-delay:0s;  }
+.data-dot:nth-child(2){ animation-delay:.5s; }
+.data-dot:nth-child(3){ animation-delay:1s;  }
+@keyframes dotPulse { 0%,100%{opacity:.7;} 50%{opacity:.15;} }
+
+.orb-lbl { font-family:'Share Tech Mono',monospace; fill:var(--c); text-anchor:middle; }
+#xenLabel  { font-size:7.5px; letter-spacing:1.5px; opacity:.6; }
+#stateText { font-size:9.5px; letter-spacing:2.5px; font-weight:bold; }
+
+#dragHint {
+  position:absolute; bottom:6px; left:0; right:0; text-align:center;
+  font-family:'Share Tech Mono',monospace; font-size:6px; letter-spacing:1px;
+  color:rgba(255,255,255,.18); pointer-events:none;
+  opacity:0; transition:opacity .3s;
+}
+#orbWrap:hover #dragHint { opacity:1; }
+
+/* Context menu */
+#ctxMenu {
+  position:fixed;
+  -webkit-app-region: no-drag;
+  background:rgba(6,10,18,.97);
+  border:1px solid rgba(30,180,255,.22);
+  border-radius:3px;
+  font-family:'Share Tech Mono',monospace; font-size:10px; color:#6a7fa8;
+  padding:4px 0; display:none; z-index:9999; min-width:140px;
+}
+.ctx-item {
+  padding:6px 13px; cursor:pointer;
+  display:flex; align-items:center; gap:7px;
+}
+.ctx-item:hover { background:rgba(30,180,255,.1); color:#e8f0ff; }
+.ctx-sep { height:1px; background:rgba(30,180,255,.1); margin:3px 0; }
+</style>
+<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&display=swap" rel="stylesheet"/>
+</head>
+<body>
+
+<div id="orbWrap" class="state-online">
+  <svg viewBox="0 0 160 160" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <radialGradient id="coreGrd" cx="38%" cy="36%" r="65%">
+        <stop offset="0%"   stop-color="#1a3a52" stop-opacity=".95"/>
+        <stop offset="100%" stop-color="#020408" stop-opacity="1"/>
+      </radialGradient>
+      <clipPath id="coreClip"><circle cx="80" cy="80" r="27"/></clipPath>
+    </defs>
+    <circle cx="80" cy="80" r="50" fill="none" stroke="var(--c)" stroke-width="28" stroke-opacity=".04"/>
+    <circle class="glowRing" cx="80" cy="80" r="52"/>
+    <circle class="wave" cx="80" cy="80" r="28"/>
+    <circle class="wave" cx="80" cy="80" r="28"/>
+    <circle class="wave" cx="80" cy="80" r="28"/>
+    <ellipse class="ring ring1" cx="80" cy="80" rx="62" ry="19"/>
+    <ellipse class="ring ring2" cx="80" cy="80" rx="62" ry="19" transform="rotate(55,80,80)"/>
+    <ellipse class="ring ring3" cx="80" cy="80" rx="19" ry="62" transform="rotate(12,80,80)"/>
+    <circle id="core" cx="80" cy="80" r="27" fill="url(#coreGrd)"/>
+    <g clip-path="url(#coreClip)">
+      <line class="scanLine" x1="53" y1="80" x2="107" y2="80"/>
+      <line class="hexLine"  x1="62" y1="66" x2="98"  y2="66"/>
+      <line class="hexLine"  x1="58" y1="73" x2="102" y2="73"/>
+      <line class="hexLine"  x1="58" y1="87" x2="102" y2="87"/>
+      <line class="hexLine"  x1="62" y1="94" x2="98"  y2="94"/>
+    </g>
+    <circle class="data-dot" cx="80" cy="53"  r="2"/>
+    <circle class="data-dot" cx="97" cy="89"  r="1.5"/>
+    <circle class="data-dot" cx="64" cy="93"  r="1.7"/>
+    <text class="orb-lbl" id="xenLabel"  x="80" y="74">XENORA</text>
+    <text class="orb-lbl" id="stateText" x="80" y="89">ONLINE</text>
+  </svg>
+  <div id="dragHint">drag · click for controls</div>
+</div>
+
+<div id="ctxMenu">
+  <div class="ctx-item" onclick="setStateManual('online')">🟢  Online</div>
+  <div class="ctx-item" onclick="setStateManual('offline')">🔴  Offline</div>
+  <div class="ctx-item" onclick="setStateManual('thinking')">🔵  Thinking</div>
+  <div class="ctx-sep"></div>
+  <div class="ctx-item" onclick="hideCtx(); window.orbAPI?.openPie?.()">⚙  Controls</div>
+  <div class="ctx-sep"></div>
+  <div class="ctx-item" onclick="hideCtx(); window.orbAPI?.close?.()">✕  Hide Orb</div>
+</div>
+
+<script>
+// ═══════════════════════════════════════════════════════
+// STATE
+// ═══════════════════════════════════════════════════════
+const wrap = document.getElementById('orbWrap');
+const STATE_LABELS = {
+  online:    'ONLINE',
+  offline:   'OFFLINE',
+  thinking:  'THINKING',
+  muted:     'MUTED',
+  done:      'DONE',
+  countdown: '',
+  searching: 'SEARCHING',
+  reading:   'READING',
+  writing:   'WRITING',
+  overclock: 'OVERCLOCK',
+  working:   'WORKING',
+  waiting:   'WAITING',
+};
+
+let _currentState = 'online';
+// What she is doing for a task right now ({active,state:'working'|'waiting',task,text}) - shown as the orb state + a one-line hint.
+let _xi = { active: false };
+function xiBase() { return _xi.active ? (_xi.state === 'waiting' ? 'waiting' : 'working') : 'online'; }
+function applyXiNow(n) {
+  _xi = n || { active: false };
+  const hint = document.getElementById('dragHint');
+  const busy = _currentState === 'thinking' || _currentState === 'countdown' || ['searching','reading','writing'].includes(_currentState);
+  if (!busy) {
+    if (_xi.active) setState(xiBase());
+    else if (_currentState === 'working' || _currentState === 'waiting') setState('online');
+  }
+  if (hint && !['countdown','searching','reading','writing'].includes(_currentState))
+    hint.textContent = _xi.active ? ((_xi.task ? _xi.task + ' · ' : '') + (_xi.text || '')).slice(0, 34) : 'drag · click for controls';
+}
+let _overclockActive = false;
+
+function setState(s) {
+  if (s === _currentState) return; // no-op prevents flicker
+  _currentState = s;
+  // Replace only the state- class, preserve everything else
+  const other = wrap.className.split(' ').filter(c => !c.startsWith('state-') && c.trim());
+  other.push('state-' + s);
+  wrap.className = other.join(' ');
+  document.getElementById('stateText').textContent = STATE_LABELS[s] || s.toUpperCase();
+}
+
+function setStateManual(s) {
+  setState(s);
+  hideCtx();
+  window.orbAPI?.broadcastState?.(s);
+}
+
+// ═══════════════════════════════════════════════════════
+// TASK-COMPLETE FLASH — a distinct color for a few seconds whenever a
+// watch-task or reminder fires, then back to whatever it was showing before.
+// ═══════════════════════════════════════════════════════
+let _doneTimer = null;
+function flashDone() {
+  const revertTo = (_currentState === 'done' || _currentState === 'countdown') ? 'online' : _currentState;
+  setState('done');
+  clearTimeout(_doneTimer);
+  _doneTimer = setTimeout(() => { if (_currentState === 'done') setState(revertTo); }, 3000);
+}
+
+// ═══════════════════════════════════════════════════════
+// POWER COUNTDOWN — live seconds-left display; click the orb to cancel.
+// ═══════════════════════════════════════════════════════
+let _countdownActive = false;
+function applyCountdown(countdown) {
+  const hint = document.getElementById('dragHint');
+  if (countdown) {
+    _countdownActive = true;
+    if (_currentState !== 'countdown') setState('countdown');
+    document.getElementById('stateText').textContent = countdown.seconds_left + 's';
+    if (hint) hint.textContent = 'click to cancel';
+  } else if (_countdownActive) {
+    _countdownActive = false;
+    if (_currentState === 'countdown') setState('online'); // corrected by the next status/speaking update if wrong
+    if (hint) hint.textContent = 'drag · click for controls';
+  }
+}
+
+// ═══════════════════════════════════════════════════════
+// FILE OP STATE — "searching"/"reading"/"writing" pushed from Layer 1/2/3
+// (writing unused until Layer 3 exists). Same click-to-interrupt pattern as
+// the power countdown above, but a SEPARATE interrupt (orb-stop-file-op) —
+// stopping a file search never touches the power countdown, watch-tasks,
+// or schedules, and vice versa.
+// ═══════════════════════════════════════════════════════
+const FILE_OP_STATES = ['searching', 'reading', 'writing'];
+let _fileOpActive = false;
+let _fileOpRevertTo = 'online';
+function applyFileOpState(state) {
+  const hint = document.getElementById('dragHint');
+  const isFileOpState = state && FILE_OP_STATES.includes(state);
+  if (isFileOpState) {
+    if (!_fileOpActive) {
+      // Remember whatever was showing before this file-op started (unless
+      // it was itself a file-op or countdown state, in which case keep the
+      // existing revert target rather than overwriting it with another
+      // transient state).
+      _fileOpRevertTo = (FILE_OP_STATES.includes(_currentState) || _currentState === 'countdown')
+        ? _fileOpRevertTo : _currentState;
+    }
+    _fileOpActive = true;
+    setState(state);
+    if (hint) hint.textContent = 'click to stop';
+  } else if (_fileOpActive) {
+    _fileOpActive = false;
+    if (FILE_OP_STATES.includes(_currentState)) setState(_fileOpRevertTo);
+    if (hint) hint.textContent = 'drag · click for controls';
+  }
+}
+
+// ═══════════════════════════════════════════════════════
+// DRAG — handled natively by -webkit-app-region:drag on #orbWrap (see CSS).
+// Electron only fires 'click' here when the mouse didn't actually move the
+// window, so this doubles as clean click-vs-drag detection for free.
+// ═══════════════════════════════════════════════════════
+wrap.addEventListener('click', e => {
+  if (e.button !== 0) return;
+  hideCtx();
+  if (_countdownActive) { window.orbAPI?.cancelPower?.(); return; }
+  if (_fileOpActive) { window.orbAPI?.stopFileOp?.(); return; }
+  window.orbAPI?.openPie?.();
+});
+
+// ═══════════════════════════════════════════════════════
+// CONTEXT MENU
+// ═══════════════════════════════════════════════════════
+const ctxMenu = document.getElementById('ctxMenu');
+
+wrap.addEventListener('contextmenu', e => {
+  e.preventDefault();
+  ctxMenu.style.display = 'block';
+  ctxMenu.style.left    = e.clientX + 'px';
+  ctxMenu.style.top     = e.clientY + 'px';
+});
+
+document.addEventListener('mousedown', e => {
+  if (!ctxMenu.contains(e.target)) hideCtx();
+});
+
+function hideCtx() { ctxMenu.style.display = 'none'; }
+
+// ═══════════════════════════════════════════════════════
+// IPC LISTENERS — single source of truth, no Socket.IO
+// ═══════════════════════════════════════════════════════
+if (window.orbAPI) {
+
+  // Visual state change pushed by orb right-click or other windows
+  window.orbAPI.onStateChange?.(s => setState(s));
+
+  // Toggle sync from main UI or pie (voice-off → muted visual, voice-on → back to online)
+  window.orbAPI.onToggleStateSync?.(d => {
+    if (d.feature === 'voice' && !_overclockActive) {
+      setState(d.enabled ? 'online' : 'muted');
+    }
+    if (d.feature === 'overclock') {
+      // Persistent override — while this is on, Overclock's color owns the
+      // orb outright; every other push below is ignored until it's off
+      // again (Overclock has no voice/vision anyway, so nothing's lost).
+      _overclockActive = d.enabled;
+      setState(d.enabled ? 'overclock' : 'online');
+      const hint = document.getElementById('dragHint');
+      if (hint) hint.textContent = d.enabled ? 'overclock engaged' : 'drag · click for controls';
+    }
+    // vision / comments changes don't affect orb colour — only voice does
+  });
+
+  // Backend state forwarded by main.js polling /api/state every 1s
+  window.orbAPI.onBackendState?.(d => {
+    if (_overclockActive) return; // Overclock owns the orb color until it's toggled off
+    if (d.type === 'speaking') {
+      setState(d.speaking ? 'thinking' : _currentState === 'thinking' ? xiBase() : _currentState);
+    } else if (d.type === 'status') {
+      if (!d.online) setState('offline');
+      else if (_currentState === 'offline') setState('online');
+    } else if (d.type === 'task_done') {
+      flashDone();
+    } else if (d.type === 'power_countdown') {
+      applyCountdown(d.countdown);
+    } else if (d.type === 'file_op_state') {
+      applyFileOpState(d.state);
+    } else if (d.type === 'xi_now') {
+      applyXiNow(d.now);
+    }
+  });
+}
+</script>
+</body>
+</html>
